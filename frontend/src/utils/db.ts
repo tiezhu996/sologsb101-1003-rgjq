@@ -392,6 +392,14 @@ export async function listPlansByElevator(elevatorId: string): Promise<PlanRow[]
   return rows.sort((a, b) => a.planDate.localeCompare(b.planDate));
 }
 
+/** 按电梯 + 计划日期查询计划（命中 [elevatorId+planDate] 复合索引，供批量生成前查重） */
+export async function findPlanByElevatorDate(
+  elevatorId: string,
+  planDate: string,
+): Promise<PlanRow | undefined> {
+  return db.plans.where('[elevatorId+planDate]').equals([elevatorId, planDate]).first();
+}
+
 export async function putPlan(row: PlanRow): Promise<void> {
   await db.plans.put(row);
 }

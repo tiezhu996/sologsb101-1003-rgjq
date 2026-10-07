@@ -6,7 +6,9 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import {
   ROW_REVISION,
+  findPlanByElevatorDate,
   listCheckItems,
+  listCheckItemsByPlan,
   listElevators,
   listPlans,
   planDatesFrom,
@@ -18,7 +20,7 @@ import {
   type ElevatorRow,
   type PlanRow,
 } from '../utils/db';
-import { itemsForCycle } from '../types/checkItem';
+import { itemsForCycle, missingItemsForCycle } from '../types/checkItem';
 import { isPlanOverdue, planProgress, type PlanDraft, type PlanState, type PlanView } from '../types/plan';
 import type { MaintCycle } from '../types/elevator';
 import { nowDateTime, todayDate } from '../utils/duration';
@@ -32,6 +34,27 @@ export interface BatchGenerateInput {
   /** 连续生成期数 */
   periods: number;
   executor: string;
+}
+
+/** 批量生成中「整台阻断」的明细 */
+export interface BatchBlockDetail {
+  elevatorId: string;
+  /** 电梯展示名（注册代码 + 使用单位） */
+  elevatorName: string;
+  /** 撞期的计划日期 */
+  planDate: string;
+}
+
+/** 批量生成结果：新增 / 合入 / 阻断分类计数 */
+export interface BatchGenerateResult {
+  /** 新建计划期数 */
+  created: number;
+  /** 合入既有未签署计划的期数（不新建计划，仅补齐缺的必检项） */
+  merged: number;
+  /** 合入时实际补充的保养项总数 */
+  mergedItems: number;
+  /** 因同期计划已签署而整台阻断的明细（电梯 + 日期） */
+  blocked: BatchBlockDetail[];
 }
 
 export const usePlanStore = defineStore('plan', () => {
@@ -124,26 +147,79 @@ export const usePlanStore = defineStore('plan', () => {
     return row;
   }
 
-  /** 按周期批量生成计划（多电梯 × 多期） */
-  async function batchGenerate(input: BatchGenerateInput): Promise<number> {
-    const rows: PlanRow[] = [];
-    const items: CheckItemRow[] = [];
-    for (const elevatorId of input.elevatorIds) {
+  /**
+   * 按周期批量生成计划（多电梯 × 多期）
+   * 撞期口径：按电梯 + 计划日期先查既有计划——
+   * 1. 无计划：新建一期并生成该周期必检项；
+   * 2. 已有未签署计划：不再新建，把本周期缺的必检项合入原计划，
+   *    保留已填结果、备注与自定义项，计划周期以先创建的一期为准（避免下一期日期漂移）；
+   * 3. 已有已签署计划：不可改动，整台电梯本次阻断（不新增也不合入），结果中列明电梯与日期。
+   * 同一批次内同一电梯多期相撞按同一口径处理。
+   */
+  async function batchGenerate(input: BatchGenerateInput): Promise<BatchGenerateResult> {
+    const result: BatchGenerateResult = { created: 0, merged: 0, mergedItems: 0, blocked: [] };
+    const executor = input.executor.trim();
+    const newPlans: PlanRow[] = [];
+    const newItems: CheckItemRow[] = [];
+    const mergedItems: CheckItemRow[] = [];
+    /** 批内已知的「电梯 + 日期 → 计划」，同批多期相撞时与库内计划同口径 */
+    const known = new Map<string, PlanRow>();
+
+    for (const elevatorId of [...new Set(input.elevatorIds)]) {
       const dates = planDatesFrom(input.startDate, input.cycleType, input.periods);
+      const creates: string[] = [];
+      const merges: Array<{ plan: PlanRow; missing: string[]; nextSeq: number }> = [];
+      const blockedDates: string[] = [];
+
+      // 先查后写：该电梯全部期次判定完再落库，任一日期撞上已签署计划即整台阻断
       for (const planDate of dates) {
+        const key = `${elevatorId}|${planDate}`;
+        let existing = known.get(key);
+        if (!existing) {
+          existing = await findPlanByElevatorDate(elevatorId, planDate);
+          if (existing) known.set(key, existing);
+        }
+        if (!existing) {
+          creates.push(planDate);
+          continue;
+        }
+        if (existing.state === 'signed') {
+          blockedDates.push(planDate);
+          continue;
+        }
+        const items = await listCheckItemsByPlan(existing.id);
+        merges.push({
+          plan: existing,
+          missing: missingItemsForCycle(input.cycleType, items.map((item) => item.itemName)),
+          nextSeq: items.reduce((max, item) => Math.max(max, item.seq), 0),
+        });
+      }
+
+      if (blockedDates.length > 0) {
+        const elevator = elevators.value.find((item) => item.id === elevatorId);
+        const elevatorName = elevator ? `${elevator.regCode}（${elevator.owner}）` : elevatorId;
+        for (const planDate of blockedDates) {
+          result.blocked.push({ elevatorId, elevatorName, planDate });
+        }
+        continue;
+      }
+
+      for (const planDate of creates) {
         const id = uuid();
-        rows.push({
+        const row: PlanRow = {
           id,
           elevatorId,
           cycleType: input.cycleType,
           planDate,
-          executor: input.executor.trim(),
+          executor,
           state: 'pending',
           signedAt: null,
           createdAt: nowDateTime(),
           revision: ROW_REVISION,
-        });
-        items.push(
+        };
+        newPlans.push(row);
+        known.set(`${elevatorId}|${planDate}`, row);
+        newItems.push(
           ...itemsForCycle(input.cycleType).map((itemName, index) => ({
             id: `chk-${id}-${index + 1}`,
             planId: id,
@@ -156,13 +232,35 @@ export const usePlanStore = defineStore('plan', () => {
             revision: ROW_REVISION,
           })),
         );
+        result.created += 1;
+      }
+
+      for (const merge of merges) {
+        result.merged += 1;
+        let seq = merge.nextSeq;
+        for (const itemName of merge.missing) {
+          seq += 1;
+          mergedItems.push({
+            id: uuid(),
+            planId: merge.plan.id,
+            seq,
+            itemName,
+            result: null,
+            value: '',
+            remark: '',
+            createdAt: nowDateTime(),
+            revision: ROW_REVISION,
+          });
+        }
+        result.mergedItems += merge.missing.length;
       }
     }
-    if (rows.length === 0) return 0;
-    await putPlans(rows);
-    await putCheckItems(items);
-    emitChange();
-    return rows.length;
+
+    if (newPlans.length > 0) await putPlans(newPlans);
+    const allItems = [...newItems, ...mergedItems];
+    if (allItems.length > 0) await putCheckItems(allItems);
+    if (newPlans.length > 0 || allItems.length > 0) emitChange();
+    return result;
   }
 
   async function updatePlan(id: string, draft: PlanDraft): Promise<void> {

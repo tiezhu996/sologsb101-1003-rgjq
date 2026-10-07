@@ -115,14 +115,25 @@ async function submitGenerate(): Promise<void> {
   } catch {
     return;
   }
-  const created = await planStore.batchGenerate({
+  const result = await planStore.batchGenerate({
     elevatorIds: generateModel.value.elevatorIds,
     cycleType: generateModel.value.cycleType,
     startDate: tsToDate(generateModel.value.startTs),
     periods: generateModel.value.periods,
     executor: generateModel.value.executor,
   });
-  message.success(`已生成 ${created} 期保养计划，并同步生成保养项清单`);
+  const mergedText =
+    result.mergedItems > 0 ? `合入 ${result.merged} 期（补必检项 ${result.mergedItems} 项）` : `合入 ${result.merged} 期`;
+  if (result.blocked.length > 0) {
+    const blockedElevators = new Set(result.blocked.map((item) => item.elevatorId)).size;
+    const detail = result.blocked.map((item) => `${item.elevatorName} ${item.planDate}`).join('；');
+    message.warning(
+      `新增 ${result.created} 期，${mergedText}；${blockedElevators} 台电梯因同期计划已签署被整台阻断：${detail}`,
+      { closable: true, duration: 10000 },
+    );
+  } else {
+    message.success(`新增 ${result.created} 期，${mergedText}，保养项清单已同步`);
+  }
   generateOpen.value = false;
 }
 
@@ -444,7 +455,7 @@ const avgRescueHint = computed(() => {
           </n-gi>
         </n-grid>
         <n-text depth="3" style="font-size: 12px">
-          将按周期口径（半月 15 天 / 季度 90 天 / 年度 365 天）依次生成计划，并同步生成对应保养项清单。
+          将按周期口径（半月 15 天 / 季度 90 天 / 年度 365 天）依次生成计划并同步保养项清单。同一电梯同一日期已有未签署计划时不再新建，改为把本周期缺的必检项合入原计划（周期以先创建的一期为准，已填结果与自定义项保留）；同期计划已签署的电梯将整台阻断并在结果中列明。
         </n-text>
       </n-form>
       <template #footer>

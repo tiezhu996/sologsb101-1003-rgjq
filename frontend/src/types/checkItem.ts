@@ -64,6 +64,15 @@ export function itemsForCycle(cycle: 'halfMonth' | 'quarter' | 'year'): string[]
   return CHECK_ITEM_LIBRARY;
 }
 
+/** 计算某周期必检项中、既有清单缺失的项目名（按项目名比对，既有项的结果与备注不动） */
+export function missingItemsForCycle(
+  cycle: 'halfMonth' | 'quarter' | 'year',
+  existingNames: string[],
+): string[] {
+  const names = new Set(existingNames);
+  return itemsForCycle(cycle).filter((itemName) => !names.has(itemName));
+}
+
 /** 异常项判定 */
 export function isAbnormal(result: CheckResult | null): boolean {
   return result === 'abnormal' || result === 'advice';
