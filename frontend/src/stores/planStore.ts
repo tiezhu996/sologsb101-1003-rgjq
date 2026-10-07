@@ -34,6 +34,18 @@ export interface BatchGenerateInput {
   executor: string;
 }
 
+/** 批量生成结果：新增 / 合入 / 阻断 分类计数 */
+export interface BatchGenerateResult {
+  /** 新增计划期数 */
+  created: number;
+  /** 合入已有未签计划的期数（不新增计划，仅补必检项） */
+  merged: number;
+  /** 因已签署同期计划被整台阻断的电梯数 */
+  blocked: number;
+  /** 阻断明细：电梯与冲突日期 */
+  blockedDetails: Array<{ elevatorId: string; elevatorLabel: string; planDate: string }>;
+}
+
 export const usePlanStore = defineStore('plan', () => {
   const plans = ref<PlanRow[]>([]);
   const elevators = ref<ElevatorRow[]>([]);
@@ -124,45 +136,102 @@ export const usePlanStore = defineStore('plan', () => {
     return row;
   }
 
-  /** 按周期批量生成计划（多电梯 × 多期） */
-  async function batchGenerate(input: BatchGenerateInput): Promise<number> {
-    const rows: PlanRow[] = [];
-    const items: CheckItemRow[] = [];
+  /**
+   * 按周期批量生成计划（多电梯 × 多期）
+   * 去重口径：先按电梯 + 计划日期查已有计划——
+   * - 有未签计划：不重复生成，把后到周期缺的必检项合入原计划（周期按先创建那一期，
+   *   保留已填结果、备注与自定义项）；
+   * - 有已签署计划：不能改动，整台阻断并记录电梯与日期；
+   * - 无同期计划：正常新增。同一电梯多期相撞逐期按此口径处理。
+   */
+  async function batchGenerate(input: BatchGenerateInput): Promise<BatchGenerateResult> {
+    const result: BatchGenerateResult = { created: 0, merged: 0, blocked: 0, blockedDetails: [] };
+    const newPlans: PlanRow[] = [];
+    const newItems: CheckItemRow[] = [];
+    const stamp = nowDateTime();
+
     for (const elevatorId of input.elevatorIds) {
       const dates = planDatesFrom(input.startDate, input.cycleType, input.periods);
+      // 按电梯 + 计划日期查已有计划（一期可能撞上多条历史重复数据，取先创建的一期为准）
+      const existingOf = (planDate: string): PlanRow[] =>
+        plans.value
+          .filter((item) => item.elevatorId === elevatorId && item.planDate === planDate)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+      // 已签署的同期计划不能改动：整台阻断并说明电梯和日期
+      const signedDates = dates.filter((planDate) =>
+        existingOf(planDate).some((item) => item.state === 'signed'),
+      );
+      if (signedDates.length > 0) {
+        const elevator = elevators.value.find((item) => item.id === elevatorId);
+        const elevatorLabel = elevator ? `${elevator.regCode}（${elevator.owner}）` : elevatorId;
+        result.blocked += 1;
+        for (const planDate of signedDates) {
+          result.blockedDetails.push({ elevatorId, elevatorLabel, planDate });
+        }
+        continue;
+      }
+
       for (const planDate of dates) {
-        const id = uuid();
-        rows.push({
-          id,
-          elevatorId,
-          cycleType: input.cycleType,
-          planDate,
-          executor: input.executor.trim(),
-          state: 'pending',
-          signedAt: null,
-          createdAt: nowDateTime(),
-          revision: ROW_REVISION,
-        });
-        items.push(
-          ...itemsForCycle(input.cycleType).map((itemName, index) => ({
-            id: `chk-${id}-${index + 1}`,
-            planId: id,
-            seq: index + 1,
+        const target = existingOf(planDate)[0];
+        if (!target) {
+          // 无同期计划：新增一期并生成必检项清单
+          const id = uuid();
+          newPlans.push({
+            id,
+            elevatorId,
+            cycleType: input.cycleType,
+            planDate,
+            executor: input.executor.trim(),
+            state: 'pending',
+            signedAt: null,
+            createdAt: stamp,
+            revision: ROW_REVISION,
+          });
+          newItems.push(
+            ...itemsForCycle(input.cycleType).map((itemName, index) => ({
+              id: `chk-${id}-${index + 1}`,
+              planId: id,
+              seq: index + 1,
+              itemName,
+              result: null,
+              value: '',
+              remark: '',
+              createdAt: stamp,
+              revision: ROW_REVISION,
+            })),
+          );
+          result.created += 1;
+          continue;
+        }
+        // 已有未签计划：周期保持先创建那一期，仅补后到周期缺的必检项，
+        // 已填结果、备注与自定义项原样保留
+        result.merged += 1;
+        const existingItems = checkItems.value.filter((item) => item.planId === target.id);
+        const existingNames = new Set(existingItems.map((item) => item.itemName));
+        let seq = existingItems.reduce((max, item) => Math.max(max, item.seq), 0);
+        for (const itemName of itemsForCycle(input.cycleType)) {
+          if (existingNames.has(itemName)) continue;
+          seq += 1;
+          newItems.push({
+            id: `chk-${target.id}-${seq}`,
+            planId: target.id,
+            seq,
             itemName,
             result: null,
             value: '',
             remark: '',
-            createdAt: nowDateTime(),
+            createdAt: stamp,
             revision: ROW_REVISION,
-          })),
-        );
+          });
+        }
       }
     }
-    if (rows.length === 0) return 0;
-    await putPlans(rows);
-    await putCheckItems(items);
-    emitChange();
-    return rows.length;
+
+    if (newPlans.length > 0) await putPlans(newPlans);
+    if (newItems.length > 0) await putCheckItems(newItems);
+    if (newPlans.length > 0 || newItems.length > 0) emitChange();
+    return result;
   }
 
   async function updatePlan(id: string, draft: PlanDraft): Promise<void> {

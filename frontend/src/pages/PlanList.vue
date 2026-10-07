@@ -115,14 +115,24 @@ async function submitGenerate(): Promise<void> {
   } catch {
     return;
   }
-  const created = await planStore.batchGenerate({
+  const result = await planStore.batchGenerate({
     elevatorIds: generateModel.value.elevatorIds,
     cycleType: generateModel.value.cycleType,
     startDate: tsToDate(generateModel.value.startTs),
     periods: generateModel.value.periods,
     executor: generateModel.value.executor,
   });
-  message.success(`已生成 ${created} 期保养计划，并同步生成保养项清单`);
+  const summary = `新增 ${result.created} 期 · 合入 ${result.merged} 期`;
+  if (result.blocked > 0) {
+    const detail = result.blockedDetails
+      .map((item) => `${item.elevatorLabel} ${item.planDate} 已签署`)
+      .join('；');
+    message.warning(`${summary} · 阻断 ${result.blocked} 台：${detail}（已签署计划不能改动）`, {
+      duration: 6000,
+    });
+  } else {
+    message.success(`${summary}，保养项清单已同步`);
+  }
   generateOpen.value = false;
 }
 
@@ -445,6 +455,8 @@ const avgRescueHint = computed(() => {
         </n-grid>
         <n-text depth="3" style="font-size: 12px">
           将按周期口径（半月 15 天 / 季度 90 天 / 年度 365 天）依次生成计划，并同步生成对应保养项清单。
+          同一电梯同一日期已有未签计划时不再重复生成，仅把缺的必检项合入原计划（周期按先创建的一期）；
+          同期计划已签署的电梯将整台阻断。
         </n-text>
       </n-form>
       <template #footer>
