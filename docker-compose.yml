@@ -1,0 +1,18 @@
+# 电梯维保工序与困人救援台账 · Docker Compose 一键部署（纯前端 SPA，无后端 / 无数据库 / 无 API 服务）
+# 顶层 name 兜底：避免中文目录名导致 compose 项目名为空（注意：不写 version 字段）
+name: gbelevsvc
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ${COMPOSE_PROJECT_NAME:-gbelevsvc}-frontend:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-gbelevsvc}-frontend
+    restart: unless-stopped
+    ports:
+      # 宿主端口可通过 .env 的 FRONTEND_PORT 覆盖，默认 22803
+      - "${FRONTEND_PORT:-22803}:80"
+    environment:
+      - TZ=Asia/Shanghai
+    # 容器无状态：数据只存浏览器本地（IndexedDB），不使用数据库服务、不挂载命名卷

@@ -1,0 +1,27 @@
+{
+  "name": "gbelevsvc-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "电梯维保工序与困人救援台账 - 纯前端 SPA（Vue 3 + TypeScript + Naive UI + Vite + Pinia + Vue Router + Dexie）",
+  "scripts": {
+    "dev": "vite --host --port 22803",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "preview": "vite preview --host --port 22803"
+  },
+  "dependencies": {
+    "dexie": "^4.0.11",
+    "naive-ui": "^2.40.4",
+    "pinia": "^2.3.1",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.7.3",
+    "vite": "^5.4.11",
+    "vue-tsc": "^2.2.0"
+  }
+}

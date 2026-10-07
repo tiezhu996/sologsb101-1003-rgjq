@@ -1,0 +1,138 @@
+/* 电梯维保工序与困人救援台账 · 全局样式
+   浅青底 + 安全绿点缀，工程台账观感，强调数据可读性。 */
+
+:root {
+  --gb-bg: #f2f8f4;
+  --gb-surface: #ffffff;
+  --gb-ink: #10261f;
+  --gb-green: #18a058;
+  --gb-green-soft: #e8f7ef;
+  --gb-blue: #2080f0;
+  --gb-warn: #f0a020;
+  --gb-danger: #d03050;
+  --gb-line: rgba(24, 160, 88, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--gb-bg);
+  color: var(--gb-ink);
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Source Han Sans SC', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  background-image:
+    radial-gradient(circle at 8% 12%, rgba(24, 160, 88, 0.08), transparent 42%),
+    radial-gradient(circle at 92% 6%, rgba(32, 128, 240, 0.07), transparent 38%),
+    repeating-linear-gradient(0deg, rgba(16, 38, 31, 0.018) 0 1px, transparent 1px 5px);
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.page-sub {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: rgba(16, 38, 31, 0.58);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+}
+
+.elevator-card {
+  background: var(--gb-surface);
+  border: 1px solid var(--gb-line);
+  border-radius: 10px;
+  padding: 14px;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  cursor: pointer;
+}
+
+.elevator-card:hover {
+  border-color: var(--gb-green);
+  box-shadow: 0 6px 18px rgba(24, 160, 88, 0.12);
+  transform: translateY(-1px);
+}
+
+.elevator-card.is-active {
+  border-color: var(--gb-green);
+  box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.18);
+}
+
+.mono {
+  font-family: 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.hint {
+  color: rgba(16, 38, 31, 0.55);
+  font-size: 12px;
+}
+
+.inline-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timeline-node {
+  border-left: 3px solid var(--gb-green);
+  padding: 8px 0 8px 12px;
+  margin-left: 6px;
+}
+
+.timeline-node.is-late {
+  border-left-color: var(--gb-danger);
+}
+
+.section-gap {
+  margin-top: 14px;
+}
+
+.row-marked {
+  background: #fffbe6;
+}

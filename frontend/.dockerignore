@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+npm-debug.log
+Dockerfile
+README.md
+.DS_Store
+.idea
+.vscode
+*.tsbuildinfo
